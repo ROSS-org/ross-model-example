@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.0)
-project(highlife)
-include(CTest)
+project(model-example)
+#include(CTest)
 
 set(CMAKE_C_STANDARD 17)
 
@@ -17,4 +17,4 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -mtune=native \
 
 add_subdirectory(src)
 
-enable_testing()
+#enable_testing()

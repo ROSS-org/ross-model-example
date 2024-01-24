@@ -1,5 +1,5 @@
-#ifndef HIGHLIFE_UTILS_H
-#define HIGHLIFE_UTILS_H
+#ifndef MODEL_UTILS_H
+#define MODEL_UTILS_H
 
 /** @file
  * Utilities that don't rely on ROSS.

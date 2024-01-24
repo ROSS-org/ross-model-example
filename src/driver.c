@@ -5,375 +5,137 @@
 
 // ================================= Global variables ================================
 
-static int init_pattern = 0;
+static int total_iterations = 0;
 
-void driver_config(int init_pattern_var) {
-    init_pattern = init_pattern_var;
+void driver_config(int total_iter) {
+    total_iterations = total_iter;
 }
 
 
-// ================================ Helper definitions ===============================
-
-#define POINTER_SWAP(x, y) {void *tmp = x; x = y; y = tmp;}
-
-
-// ================================= Helper functions ================================
-
-static bool array_swap(unsigned char *grid, unsigned char *grid_msg, size_t n_cells) {
-  bool change = false;
-  unsigned char tmp;
-  for (size_t i = 0; i < n_cells; i++, grid_msg++, grid++) {
-    tmp = *grid_msg;
-    *grid_msg = *grid;
-    *grid = tmp;
-
-    if(!change && (*grid != *grid_msg)) {
-      change = true;
-    }
-  }
-  return change;
-}
-
-
-static inline void copy_row(unsigned char * const into, unsigned char const * const from) {
-  for (int i = 0; i < W_WIDTH; i++) {
-    into[i] = from[i];
-  }
-}
-
-
-// ------------------------- Helper initialization functions -------------------------
-
-static inline void hl_init_all_zeros(struct HighlifeState *s) {
-  for (size_t i = 0; i < W_WIDTH * W_HEIGHT; i++) {
-      s->grid[i] = 0;
-  }
-}
-
-
-static inline void hl_init_all_ones(struct HighlifeState *s) {
-  hl_init_all_zeros(s);
-  for (size_t i = W_WIDTH; i < W_WIDTH * (W_HEIGHT - 1); i++) {
-      s->grid[i] = 1;
-  }
-}
-
-
-static inline void hl_init_ones_in_middle(struct HighlifeState *s) {
-  hl_init_all_zeros(s);
-  // Iterating over row 10
-  for (size_t i = 10 * W_WIDTH; i < 11 * W_WIDTH; i++) {
-    if ((i >= (10 * W_WIDTH + 10)) && (i < (10 * W_WIDTH + 20))) {
-        s->grid[i] = 1;
-    }
-  }
-}
-
-
-static inline void hl_init_ones_at_corners(struct HighlifeState *s, unsigned long self) {
-  hl_init_all_zeros(s);
-
-  if (self == 0) {
-    s->grid[W_WIDTH] = 1;                                   // upper left
-    s->grid[2 * W_WIDTH - 1] = 1;                           // upper right
-  }
-  if (self == g_tw_total_lps - 1) {
-    s->grid[(W_WIDTH * (W_HEIGHT - 2))] = 1;                // lower left
-    s->grid[(W_WIDTH * (W_HEIGHT - 2)) + W_WIDTH - 1] = 1;  // lower right
-  }
-}
-
-
-static inline void hl_init_spinner_at_corner(struct HighlifeState *s, unsigned long self) {
-  hl_init_all_zeros(s);
-
-  if (self == 0) {
-    s->grid[W_WIDTH] = 1;            // upper left
-    s->grid[W_WIDTH+1] = 1;            // upper left +1
-    s->grid[2*W_WIDTH - 1] = 1;  // upper right
-  }
-}
-
-
-static inline void hl_init_replicator(struct HighlifeState *s, unsigned long self) {
-  hl_init_all_zeros(s);
-
-  if (self == 0) {
-    size_t x, y;
-    x = W_WIDTH / 2;
-    y = W_HEIGHT / 2;
-
-    s->grid[x + y * W_WIDTH + 1] = 1;
-    s->grid[x + y * W_WIDTH + 2] = 1;
-    s->grid[x + y * W_WIDTH + 3] = 1;
-    s->grid[x + (y + 1) * W_WIDTH] = 1;
-    s->grid[x + (y + 2) * W_WIDTH] = 1;
-    s->grid[x + (y + 3) * W_WIDTH] = 1;
-  }
-}
-
-
-static inline void hl_init_diagonal(struct HighlifeState *s) {
-  hl_init_all_zeros(s);
-
-  for (int i = 0; i < W_WIDTH && i < W_HEIGHT; i++) {
-      s->grid[(i+1)*W_WIDTH + i] = 1;
-  }
-}
-
-
-static void hl_print_world(FILE *stream, struct HighlifeState *s) {
-  size_t i, j;
-
-  fprintf(stream, "Print World - Iteration %d\n", s->steps);
-
-  fprintf(stream, "Ghost:  ");
-  for (j = 0; j < W_WIDTH; j++) {
-    fprintf(stream, "%u ", (unsigned int)s->grid[j]);
-  }
-  fprintf(stream, "\n");
-
-  for (i = 1; i < W_HEIGHT-1; i++) {
-    fprintf(stream, "Row %2zu: ", i);
-    for (j = 0; j < W_WIDTH; j++) {
-      fprintf(stream, "%u ", (unsigned int)s->grid[(i * W_WIDTH) + j]);
-    }
-    fprintf(stream, "\n");
-  }
-
-  fprintf(stream, "Ghost:  ");
-  for (j = 0; j < W_WIDTH; j++) {
-    fprintf(stream, "%u ", (unsigned int)s->grid[(i * W_WIDTH) + j]);
-  }
-  fprintf(stream, "\n");
-}
-
-
-// -------------------------- Helper HighLife step functions -------------------------
-
-/** Determines the number of alive cells around a given point in space */
-static inline unsigned int hl_count_alive_cells(
-        unsigned char *data, size_t x0, size_t x1, size_t x2, size_t y0, size_t y1, size_t y2) {
-  // y1+x1 represents the position in the one dimensional array where
-  // the point (y, x) would be located in 2D space, if the array was a
-  // two dimensional array.
-  // y1+x0 is the position to the left of (y, x)
-  // y0+x1 is the position on top of (y, x)
-  // y2+x2 is the position diagonally bottom, right to (y, x)
-  return data[y0 + x0] + data[y0 + x1] + data[y0 + x2]
-       + data[y1 + x0]                 + data[y1 + x2]
-       + data[y2 + x0] + data[y2 + x1] + data[y2 + x2];
-}
-
-
-/** Serial version of standard byte-per-cell life */
-static int hl_iterate_serial(unsigned char *grid, unsigned char *grid_msg) {
-  int changed = 0; // Tracking change in the grid
-
-  // The code seems more intricate than what it actually is.
-  // The second and third loops are in charge of computing a single
-  // transition of the game of life.
-  // The first loop runs the transition a number of times (`iterations`
-  // times).
-  for (size_t y = 1; y < W_HEIGHT-1; ++y) {
-    // This seems oddly complicated, but it is just obfuscated module
-    // operations. The grid of the game of life fold on itself. It is
-    // geometrically a donut/torus.
-    //
-    // `y1` is the position in the 1D array which corresponds to the
-    // first column for the row `y`
-    //
-    // `x1` is the relative position of `x` with respect to the first
-    // column in row `y`
-    //
-    // For example, let's assume that (y, x) = (2, 3) and the following
-    // world:
-    //
-    //   0 1 2 3 4
-    // 0 . . . . .
-    // 1 . . . . .
-    // 2 . . . # .
-    // 3 . . . . .
-    //
-    // Then x1 = x = 3,
-    // and  y1 = y * 5 = 10.
-    // Which, when added up, give us the position in the 1D array
-    //
-    // . . . . . . . . . . . . . # . . . . . .
-    // 0 1 2 3 4 5 6 7 8 9 1 1 1 1 1 1 1 1 1 1
-    //                     0 1 2 3 4 5 6 7 8 9
-    //
-    // x0 is the column to the left of x1 (taking into account the torus geometry)
-    // y0 is the row above to y1 (taking into account the torus geometry)
-    size_t y0, y1, y2;
-    y1 = y * W_WIDTH;
-    y0 = ((y + W_HEIGHT - 1) % W_HEIGHT) * W_WIDTH;
-    y2 = ((y + 1) % W_HEIGHT) * W_WIDTH;
-
-    for (size_t x = 0; x < W_WIDTH; ++x) {
-      // Computing important positions for x
-      size_t x0, x1, x2;
-      x1 = x;
-      x0 = (x1 + W_WIDTH - 1) % W_WIDTH;
-      x2 = (x1 + 1) % W_WIDTH;
-
-      // Determining the next state for a single cell. We count how
-      // many alive neighbours the current (y, x) cell has and
-      // follow the rules for HighLife
-      int neighbours = hl_count_alive_cells(grid, x0, x1, x2, y0, y1, y2);
-      if (grid[y1 + x1]) {  // if alive
-        grid_msg[y1 + x1] = neighbours == 2 || neighbours == 3;
-      } else {  // if dead
-        grid_msg[y1 + x1] = neighbours == 3 || neighbours == 6;
-      }
-
-      if ((!changed) && (grid[y1 + x1] != grid_msg[y1 + x1])) {
-          changed = 1;
-      }
-    }
-  }
-
-  return changed;
-}
-
-
-/** Sends a heartbeat */
-static void send_tick(tw_lp *lp, float dt) {
+// ========================== Helper functions =========================
+void producer_send_self_next(struct tw_lp *lp) {
   uint64_t const self = lp->gid;
-  tw_event *e = tw_event_new(self, dt, lp);
+  assert(self == 0);
+  double const offset = 1;
+  tw_event *e = tw_event_new(self, offset, lp);
   struct Message *msg = tw_event_data(e);
-  msg->type = MESSAGE_TYPE_step;
-  msg->sender = self;
-  msg->rev_state = NULL;
-  tw_event_send(e);
+  msg->lp_type = MESSAGE_LP_TYPE_producer;
+  msg->prod_type = MESSAGE_PRODUCER_next;
   assert_valid_Message(msg);
+  tw_event_send(e);
 }
 
 
-/** Sends a (new) rows to neighboring grids/LPs/mini-worlds */
-static void send_rows(struct HighlifeState *s, tw_lp *lp) {
-  uint64_t const self = lp->gid;
-
-  // Sending rows to update
-  int lp_id_up = (self + g_tw_total_lps - 1) % g_tw_total_lps;
-  int lp_id_down = (self+1) % g_tw_total_lps;
-
-  tw_event *e_drow = tw_event_new(lp_id_up, 0.5, lp);
-  struct Message *msg_drow = tw_event_data(e_drow);
-  msg_drow->type = MESSAGE_TYPE_row_update;
-  msg_drow->dir = ROW_DIRECTION_down_row; // Other LP's down row, not mine
-  copy_row(msg_drow->row, s->grid + W_WIDTH);
-  tw_event_send(e_drow);
-  assert_valid_Message(msg_drow);
-
-  tw_event *e_urow = tw_event_new(lp_id_down, 0.5, lp);
-  struct Message *msg_urow = tw_event_data(e_urow);
-  msg_urow->type = MESSAGE_TYPE_row_update;
-  msg_urow->dir = ROW_DIRECTION_up_row;
-  copy_row(msg_urow->row, s->grid + (W_WIDTH * (W_HEIGHT - 2)));
-  tw_event_send(e_urow);
-  assert_valid_Message(msg_drow);
+void producer_send_add_to_cruncher(struct ProducerState *s, struct tw_lp *lp, int value) {
+  double const offset = 0.5;
+  uint64_t const other = 1;
+  tw_event *e = tw_event_new(other, offset, lp);
+  struct Message *msg = tw_event_data(e);
+  msg->lp_type = MESSAGE_LP_TYPE_cruncher;
+  msg->crunch_type = MESSAGE_CRUNCHER_add;
+  msg->to_add = value;
+  assert_valid_Message(msg);
+  tw_event_send(e);
 }
 
 
-// ========================== Helper HighLife step functions =========================
+// ========================== Model functions =========================
 // These functions are called directly by ROSS
 
 // LP initialization. Called once for each LP
-void highlife_init(struct HighlifeState *s, struct tw_lp *lp) {
+void producer_init(struct ProducerState *s, struct tw_lp *lp) {
   uint64_t const self = lp->gid;
-  s->grid = malloc(W_WIDTH * W_HEIGHT * sizeof(unsigned char));
+  uint64_t const other = 1;
+  assert(self == 0);
 
-  switch (init_pattern) {
-  case 0: hl_init_all_zeros(s); break;
-  case 1: hl_init_all_ones(s); break;
-  case 2: hl_init_ones_in_middle(s); break;
-  case 3: hl_init_ones_at_corners(s, self); break;
-  case 4: hl_init_spinner_at_corner(s, self); break;
-  case 5: hl_init_replicator(s, self); break;
-  case 6: hl_init_diagonal(s); break;
-  default:
-    printf("Pattern %u has not been implemented \n", init_pattern);
-    /*exit(-1);*/
-    MPI_Abort(MPI_COMM_WORLD, -1);
+  if (total_iterations <= 0) {
+      s->number_left = 0;
+      return;
   }
 
-  // Finding name for file
-  char const fmt[] = "output/highlife-gid=%lu.txt";
-  int sz = snprintf(NULL, 0, fmt, self);
-  char filename[sz + 1]; // `+ 1` for terminating null byte
-  snprintf(filename, sizeof(filename), fmt, self);
+  // Initialize Producer iter count
+  s->number_left = total_iterations;
+  // Send initialization to itself
+  producer_send_self_next(lp);
 
-  // Creating file handler and printing initial state of the grid
-  s->fp = fopen(filename, "w");
-  if (!s->fp) {
-    fprintf(stderr, "File opening failed: '%s'\n", filename);
-    MPI_Abort(MPI_COMM_WORLD, -1);
-  } else {
-    hl_print_world(s->fp, s);
-    fprintf(s->fp, "\n");
+  // Send initialize to cruncher
+  double const offset = 0.5;
+  tw_event *e = tw_event_new(other, offset, lp);
+  struct Message *msg = tw_event_data(e);
+  msg->lp_type = MESSAGE_LP_TYPE_cruncher;
+  msg->crunch_type = MESSAGE_CRUNCHER_initialize;
+  assert_valid_Message(msg);
+  tw_event_send(e);
+
+  assert_valid_ProducerState(s);
+}
+
+
+// LP pre_run. Called once for each LP. Used to schedule events to other LPs
+// at init (because init cannot schedule events to other events)
+void producer_pre_run(struct ProducerState *s, struct tw_lp *lp) {
+  uint64_t const self = lp->gid;
+  uint64_t const other = 1;
+  assert(self == 0);
+
+  if (s->number_left > 0) {
+      // Send msg to Cruncher
+      double const offset = 1;
+
+      tw_event *e = tw_event_new(other, offset, lp);
+      struct Message *msg = tw_event_data(e);
+      msg->lp_type = MESSAGE_LP_TYPE_cruncher;
+      msg->crunch_type = MESSAGE_CRUNCHER_initialize;
+      assert_valid_Message(msg);
+      tw_event_send(e);
   }
 
-  // Tick message to myself
-  send_tick(lp, 1);
-  s->next_beat_sent = 1;
-  // Sending rows to update
-  send_rows(s, lp);
-  assert_valid_HighlifeState(s);
+  assert_valid_ProducerState(s);
 }
 
 
 // Forward event handler
-void highlife_event(
-        struct HighlifeState *s,
+void producer_event(
+        struct ProducerState *s,
         struct tw_bf *bitfield,
         struct Message *in_msg,
         struct tw_lp *lp) {
   // initialize the bit field
-  bitfield->c0 = s->next_beat_sent;
+  (void)bitfield;
+  assert(in_msg->lp_type == MESSAGE_LP_TYPE_producer);
+  uint64_t const self = lp->gid;
+  uint64_t const other = 1;
+  assert(self == 0);
 
   // handle the message
-  switch (in_msg->type) {
-  case MESSAGE_TYPE_step:
-    in_msg->rev_state = calloc(W_WIDTH * W_HEIGHT, sizeof(unsigned char));
-
-    // Next step in the simulation (is stored in second parameter)
-    int changed = hl_iterate_serial(s->grid, in_msg->rev_state);
-    // Exchanging parameters from one site to the other
-    POINTER_SWAP(s->grid, in_msg->rev_state);
-    s->next_beat_sent = 0;
-
-    s->steps++;
-    if (changed) {
-      // Sending tick for next STEP
-      send_tick(lp, 1);
-      // Sending rows to update
-      send_rows(s, lp);
-      s->next_beat_sent = 1;
-    }
-    break;
-
-  case MESSAGE_TYPE_row_update:
+  switch (in_msg->prod_type) {
+  case MESSAGE_PRODUCER_next:
     {
-    bool change;  //< To store whether the update took place or there was no change between
-                  // the two rows
-    switch (in_msg->dir) {
-    case ROW_DIRECTION_up_row:
-      change = array_swap(s->grid, in_msg->row, W_WIDTH);
-      break;
-    case ROW_DIRECTION_down_row:
-      change = array_swap(s->grid + W_WIDTH*(W_HEIGHT-1), in_msg->row, W_WIDTH);
-      /*hl_print_world(stdout, s);*/
-      break;
-    }
-    if (!s->next_beat_sent && change) {
-      // In case the heartbeat hasn't been sent yet and this message modified the state of
-      // the grid, then sent a heartbeat to self
-      send_tick(lp, 0.5);
-      s->next_beat_sent = 1;
+      // Message to cruncher
+      int const value = s->number_left--;
+      producer_send_add_to_cruncher(s, lp, value);
+
+      if (s->number_left > 0) {
+        // Message to itself
+        producer_send_self_next(lp);
+      } else {
+        // most offset values don't matter, this does, it has to be processed AFTER the add operation
+        // Another option to force an order on message processing (when tied) is user defined priorities
+        double const offset = 0.75;
+        tw_event *e = tw_event_new(other, offset, lp);
+        struct Message *msg = tw_event_data(e);
+        msg->lp_type = MESSAGE_LP_TYPE_cruncher;
+        msg->crunch_type = MESSAGE_CRUNCHER_return;
+        assert_valid_Message(msg);
+        tw_event_send(e);
+      }
     }
     break;
-    }
+  case MESSAGE_PRODUCER_total:
+    // We print to screen the value that we receive for total, but we only do
+    // it at commit, otherwise (in optimistic mode) the message could be
+    // printed multiple times if it is rolledback and processed again
+    break;
   }
   assert_valid_Message(in_msg);
 }
@@ -382,34 +144,23 @@ void highlife_event(
 // Reverse Event Handler
 // Notice that all operations are reversed using the data stored in either the reverse
 // message or the bit field
-void highlife_event_reverse(
-        struct HighlifeState *s,
+void producer_event_reverse(
+        struct ProducerState *s,
         struct tw_bf *bitfield,
         struct Message *in_msg,
         struct tw_lp *lp) {
+  (void)bitfield;
   (void)lp;
 
   // handle the message
-  switch (in_msg->type) {
-  case MESSAGE_TYPE_step:
-    s->steps--;
-    POINTER_SWAP(s->grid, in_msg->rev_state);
-    free(in_msg->rev_state);  // Freeing memory allocated by forward handler
-    in_msg->rev_state = NULL;
+  switch (in_msg->prod_type) {
+  case MESSAGE_PRODUCER_next:
+    s->number_left++;
     break;
-  case MESSAGE_TYPE_row_update:
-    switch (in_msg->dir) {
-    case ROW_DIRECTION_up_row:
-      array_swap(s->grid, in_msg->row, W_WIDTH);
-      break;
-    case ROW_DIRECTION_down_row:
-      array_swap(s->grid + W_WIDTH*(W_HEIGHT-1), in_msg->row, W_WIDTH);
-      break;
-    }
+  case MESSAGE_PRODUCER_total:
     break;
   }
 
-  s->next_beat_sent = bitfield->c0;
   assert_valid_Message(in_msg);
 }
 
@@ -417,8 +168,8 @@ void highlife_event_reverse(
 // Commit event handler
 // This function is only called when it can be make sure that the message won't be
 // roll back. Either the commit or reverse handler will be called, not both
-void highlife_event_commit(
-        struct HighlifeState *s,
+void producer_event_commit(
+        struct ProducerState *s,
         struct tw_bf *bitfield,
         struct Message *in_msg,
         struct tw_lp *lp) {
@@ -427,29 +178,91 @@ void highlife_event_commit(
   (void)lp;
 
   // handle the message
-  if (in_msg->type == MESSAGE_TYPE_step) {
-    free(in_msg->rev_state);  // Freeing memory allocated by forward handler
-    in_msg->rev_state = NULL;
+  if (in_msg->prod_type == MESSAGE_PRODUCER_total) {
+      printf("The total is: %d\n", in_msg->total);
   }
   assert_valid_Message(in_msg);
 }
 
 
-// The finalization function
-// Reporting any final statistics for this LP in the file previously opened
-void highlife_final(struct HighlifeState *s, struct tw_lp *lp) {
-  uint64_t const self = lp->gid;
-  printf("LP %lu handled %d MESSAGE_TYPE_step messages\n", self, s->steps);
-  printf("LP %lu: The current (local) time is %f\n\n", self, tw_now(lp));
+void cruncher_init(struct CruncherState *s, struct tw_lp *lp) {
+    (void)s;
+    (void)lp;
+    s->times_added = 0;
+    assert_valid_CruncherState(s);
+}
 
-  if (!s->fp) {
-    fprintf(stderr, "File to output is closed!\n");
-    MPI_Abort(MPI_COMM_WORLD, -1);
-  } else {
-    fprintf(s->fp, "%lu handled %d MESSAGE_TYPE_step messages\n", self, s->steps);
-    fprintf(s->fp, "The current (local) time is %f\n\n", tw_now(lp));
-    hl_print_world(s->fp, s);
-    fclose(s->fp);
+
+// Forward event handler
+void cruncher_event(
+        struct CruncherState *s,
+        struct tw_bf *bitfield,
+        struct Message *in_msg,
+        struct tw_lp *lp) {
+  // initialize the bit field
+  (void)bitfield;
+  assert(in_msg->lp_type == MESSAGE_LP_TYPE_cruncher);
+
+  uint64_t const self = lp->gid;
+  uint64_t const other = 0;
+  assert(self == 1);
+
+  switch (in_msg->crunch_type) {
+  case MESSAGE_CRUNCHER_initialize:
+    s->total = 0;
+    break;
+  case MESSAGE_CRUNCHER_add:
+    //For debugging purposes only, not parallel optimistic safe
+    //printf("Received %d with (prev) total of %d", in_msg->to_add, s->total);
+    s->total += in_msg->to_add;
+    s->times_added++;
+    //For debugging purposes only, not parallel optimistic safe
+    //printf(" and now total of %d\n", s->total);
+    break;
+  case MESSAGE_CRUNCHER_return:
+    {
+      double const offset = 0.75;
+      tw_event *e = tw_event_new(other, offset, lp);
+      struct Message *msg = tw_event_data(e);
+      msg->lp_type = MESSAGE_LP_TYPE_producer;
+      msg->prod_type = MESSAGE_PRODUCER_total;
+      msg->total = s->total;
+      assert_valid_Message(msg);
+      tw_event_send(e);
+    }
+    break;
   }
-  free(s->grid);
+}
+
+
+// Reverse Event Handler
+void cruncher_event_reverse(
+        struct CruncherState *s,
+        struct tw_bf *bitfield,
+        struct Message *in_msg,
+        struct tw_lp *lp) {
+  (void)bitfield;
+  (void)lp;
+
+  switch (in_msg->crunch_type) {
+  case MESSAGE_CRUNCHER_initialize:
+    // TODO: This is a potential bug! We are not rollbacking to the actual
+    // previous state of the system, but we didn't save it anywhere. Exercise
+    // for the reader: FIX
+    // s->total = ?
+    break;
+  case MESSAGE_CRUNCHER_add:
+    s->total -= in_msg->to_add;
+    s->times_added--;
+    break;
+  case MESSAGE_CRUNCHER_return:
+    break;
+  }
+}
+
+
+// Reporting any final statistics for this LP in the file previously opened
+void cruncher_final(struct CruncherState *s, struct tw_lp *lp) {
+    (void)lp;
+    printf("Cruncher processed a total of %d messages\n", s->times_added);
 }

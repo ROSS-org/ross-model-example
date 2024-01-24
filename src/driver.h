@@ -1,40 +1,63 @@
-#ifndef HIGHLIFE_DRIVER_H
-#define HIGHLIFE_DRIVER_H
+#ifndef MODEL_DRIVER_H
+#define MODEL_DRIVER_H
 
 /** @file
- * Functions implementing Highlife as PDES in ROSS.
+ * Functions implementing Model as PDES in ROSS.
  */
 
 #include "state.h"
 
 /** Setting global variables to by the simulation. */
-void driver_config(int init_pattern);
+void driver_config(int total_iterations);
 
-/** Grid initialization and first heartbeat. */
-void highlife_init(struct HighlifeState *s, struct tw_lp *lp);
+// ============== PRODUCER ==============
+/** Initialization. */
+void producer_init(struct ProducerState *s, struct tw_lp *lp);
+
+/** Scheduling events to other LPs. */
+void producer_pre_run(struct ProducerState *s, struct tw_lp *lp);
 
 /** Forward event handler. */
-void highlife_event(
-        struct HighlifeState *s,
+void producer_event(
+        struct ProducerState *s,
         struct tw_bf *bf,
         struct Message *in_msg,
         struct tw_lp *lp);
 
 /** Reverse event handler. */
-void highlife_event_reverse(
-        struct HighlifeState *s,
+void producer_event_reverse(
+        struct ProducerState *s,
         struct tw_bf *bf,
         struct Message *in_msg,
         struct tw_lp *lp);
 
 /** Commit event handler. */
-void highlife_event_commit(
-        struct HighlifeState *s,
+void producer_event_commit(
+        struct ProducerState *s,
+        struct tw_bf *bf,
+        struct Message *in_msg,
+        struct tw_lp *lp);
+
+
+// ============== CRUNCHER ==============
+/** Initialization. */
+void cruncher_init(struct CruncherState *s, struct tw_lp *lp);
+
+/** Forward event handler. */
+void cruncher_event(
+        struct CruncherState *s,
+        struct tw_bf *bf,
+        struct Message *in_msg,
+        struct tw_lp *lp);
+
+/** Reverse event handler. */
+void cruncher_event_reverse(
+        struct CruncherState *s,
         struct tw_bf *bf,
         struct Message *in_msg,
         struct tw_lp *lp);
 
 /** Cleaning and printing info before shut down. */
-void highlife_final(struct HighlifeState *s, struct tw_lp *lp);
+void cruncher_final(struct CruncherState *s, struct tw_lp *lp);
 
 #endif /* end of include guard */

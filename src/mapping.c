@@ -1,17 +1,15 @@
 #include <ross.h>
+#include <assert.h>
 
-tw_peid highlife_map(tw_lpid gid) { return (tw_peid)gid / g_tw_nlp; }
+tw_peid model_map(tw_lpid gid) { return (tw_peid)gid / g_tw_nlp; }
 
-/*
 // Multiple LP Types mapping function
 //    Given an LP's GID
 //    Return the index in the LP type array (defined in model_main.c)
 tw_lpid model_typemap (tw_lpid gid) {
-  // since this model has one type
-  // always return index of 1st LP type
-  return 0;
+  assert(gid == 0 || gid == 1);
+  return gid;
 }
-*/
 
 
 /*

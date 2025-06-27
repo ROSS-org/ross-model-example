@@ -10,7 +10,7 @@ This is a small, ROSS example model to show how to have multiple LP types in [RO
 The following are the instructions to download and compile:
 
 ```bash
-git clone --recurse-submodules -j8 https://github.com/helq/ross-model-example
+git clone --recurse-submodules -j8 https://github.com/ROSS-org/ross-model-example
 mkdir ross-model-example/build
 cd ross-model-example/build
 cmake .. -DCMAKE_INSTALL_PREFIX="$(pwd -P)/"

@@ -26,7 +26,7 @@ An example of running in one core or two:
 ```bash
 cd build
 bin/modelbin --help
-mpirun -np 2 bin/modelbin --sync=2 --batch=1 --pattern=5 --end=41
+mpirun -np 2 bin/modelbin --sync=2 --batch=1 --total-iter=1000 --end=41
 ```
 
 # Documentation
